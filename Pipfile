@@ -17,6 +17,7 @@ wheel = "0.43.0"
 setuptools = "70.2.0"
 twine = "5.1.1"
 pytest = "8.2.2"
+pytest-xdist = "3.3.0"
 coverage = "7.5.4"
 
 [requires]

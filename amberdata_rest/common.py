@@ -17,7 +17,6 @@ import os
 
 
 class SecretManager:
-
     _secretClient: boto3.client
 
     def __init__(self, region: str = 'us-east-1'):
@@ -34,14 +33,17 @@ class SecretManager:
         secretString = secretResponse['SecretString']
         return secretString
 
+
 class ApiKeyGetMode(Enum):
     LOCAL_FILE = "local_file"
     AWS_SECRET_MANAGER = "aws_secret_manager"
+
 
 class NoDataReturned(Exception):
     def __init__(self, message="No data returned from the API"):
         self.message = message
         super().__init__(self.message)
+
 
 class RestService(ABC):
     _key_get_mode: ApiKeyGetMode
@@ -124,7 +126,10 @@ class RestService(ABC):
             lg.debug(f"Executing request with url:{url}, params={params}, retryCount:{retry_count}")
             with requests.session() as session:
                 try:
-                    response_raw = session.get(url, headers=headers, params=params)
+                    if "?" in url:
+                        response_raw = session.get(url, headers=headers)
+                    else:
+                        response_raw = session.get(url, headers=headers, params=params)
                     response_raw.raise_for_status()
                     response_data = json.loads(response_raw.text)
                     clean_response = cls._validate_response(response_data, description, url, params)
@@ -156,6 +161,245 @@ class RestService(ABC):
         return return_dict
 
     @staticmethod
+    def _detect_key_to_list_structure(sub_payload, metadata) -> bool:
+        """
+        Auto-detect if this is a key-to-list structure where:
+        - sub_payload is a dict with string keys (e.g., hash addresses, IDs)
+        - each key maps to a list of records (lists)
+        - metadata contains 'columns' definition
+        """
+        if not isinstance(sub_payload, dict) or len(sub_payload) == 0:
+            return False
+
+        if 'columns' not in metadata:
+            return False
+
+        # Check if all keys are strings and all values are lists
+        for key, value in sub_payload.items():
+            if not isinstance(key, str) or not isinstance(value, list):
+                return False
+
+            # Check if this key has records and if first record is a list (multiple values)
+            if len(value) > 0:
+                first_record = value[0]
+                if isinstance(first_record, list) and len(first_record) == len(metadata['columns']):
+                    continue
+                else:
+                    return False
+
+        return True
+
+    @staticmethod
+    def _process_key_to_list_structure(sub_payload, metadata) -> pd.DataFrame:
+        """
+        Process key-to-list structure into DataFrame with keys as index.
+
+        Structure:
+        {
+          "key1": [[record1_values], [record2_values], ...],
+          "key2": [[record1_values], [record2_values], ...],
+          ...
+        }
+
+        Result: DataFrame with keys as index, multiple rows per key
+        """
+        columns = metadata['columns']
+        processed_data = []
+
+        for key_identifier, records in sub_payload.items():
+            for record in records:
+                if len(record) == len(columns):
+                    # Create a row with key as index identifier
+                    row_data = dict(zip(columns, record))
+                    row_data['_key_index'] = key_identifier  # Temporary column for index
+                    processed_data.append(row_data)
+
+        if not processed_data:
+            return pd.DataFrame()
+
+        # Create DataFrame
+        _df = pd.DataFrame(processed_data)
+
+        # Set key as index and remove the temporary column
+        _df.set_index('_key_index', inplace=True)
+        _df.index.name = None  # Remove index name for cleaner appearance
+
+        # Add any additional metadata as columns (excluding 'columns')
+        for key in metadata.keys():
+            if key != "columns":
+                _df[key] = str(metadata[key])
+
+        return _df
+
+    @staticmethod
+    def _detect_nested_dict_structure(sub_payload, metadata, max_levels: int = 5) -> tuple[bool, int]:
+        """
+        Auto-detect nested dictionary structure and return actual depth.
+
+        Detects patterns like:
+        - 2-level: category → items → {properties}
+        - 3-level: exchange → pools → {properties}
+        - 4-level: country → state → city → {properties}
+
+        Args:
+            sub_payload: The data payload to analyze
+            metadata: Metadata dict (excluded from nesting analysis)
+            max_levels: Maximum allowed nesting depth
+
+        Returns:
+            tuple: (is_nested_dict_structure, actual_depth)
+        """
+        if not isinstance(sub_payload, dict) or len(sub_payload) == 0:
+            return False, 0
+
+        # Exclude metadata from structure analysis
+        data_keys = [k for k in sub_payload.keys() if k != 'metadata']
+        if len(data_keys) == 0:
+            return False, 0
+
+        def _get_depth_to_primitives(obj, current_depth=0):
+            """Recursively find depth until we hit primitive values"""
+            if not isinstance(obj, dict):
+                return current_depth
+
+            if len(obj) == 0:
+                return current_depth
+
+            # Check first item to determine depth
+            first_key = next(iter(obj.keys()))
+            first_value = obj[first_key]
+
+            if isinstance(first_value, dict):
+                return _get_depth_to_primitives(first_value, current_depth + 1)
+            else:
+                # Hit primitive values
+                return current_depth + 1
+
+        # Detect depth from first data key
+        first_data_key = data_keys[0]
+        detected_depth = _get_depth_to_primitives(sub_payload[first_data_key])
+
+        # Validate depth is within limits
+        if detected_depth < 2 or detected_depth > max_levels:
+            return False, 0
+
+        # Validate consistency across all data keys
+        for key in data_keys:
+            key_depth = _get_depth_to_primitives(sub_payload[key])
+            if key_depth != detected_depth:
+                return False, 0
+
+            # Validate structure consistency at each level
+            def _validate_structure_consistency(obj, target_depth, current_depth=0):
+                if current_depth == target_depth - 1:
+                    # At the deepest level before primitives, ensure all values are dicts with primitives
+                    if not isinstance(obj, dict):
+                        return False
+                    for sub_key, sub_value in obj.items():
+                        if isinstance(sub_value, dict):
+                            # This dict should contain only primitives
+                            for prop_key, prop_value in sub_value.items():
+                                if isinstance(prop_value, (dict, list)):
+                                    return False
+                        else:
+                            return False
+                    return True
+                else:
+                    # Not at deepest level yet, ensure all values are dicts
+                    if not isinstance(obj, dict):
+                        return False
+                    for sub_key, sub_value in obj.items():
+                        if not isinstance(sub_value, dict):
+                            return False
+                        if not _validate_structure_consistency(sub_value, target_depth, current_depth + 1):
+                            return False
+                    return True
+
+            if not _validate_structure_consistency(sub_payload[key], detected_depth):
+                return False, 0
+
+        return True, detected_depth
+
+    @staticmethod
+    def _process_nested_dict_structure(sub_payload, metadata, actual_depth: int) -> pd.DataFrame:
+        """
+        Process nested dictionary structure into DataFrame with multi-level index.
+
+        Args:
+            sub_payload: The nested dictionary data
+            metadata: Metadata dict
+            actual_depth: The actual depth of nesting detected
+
+        Returns:
+            DataFrame with multi-level index from all levels except deepest,
+            and columns from deepest level properties
+        """
+        processed_data = []
+
+        # Exclude metadata from processing
+        data_keys = [k for k in sub_payload.keys() if k != 'metadata']
+
+        def _flatten_nested_dict(obj, index_path=[], current_depth=0):
+            """Recursively flatten nested dict structure"""
+            if current_depth == actual_depth - 1:
+                # At the level containing the final objects
+                for key, properties in obj.items():
+                    if isinstance(properties, dict):
+                        # Create full index path
+                        full_index = index_path + [key]
+
+                        # Create row with index information and properties
+                        row_data = properties.copy()
+
+                        # Add index levels as temporary columns for later multi-index creation
+                        for i, index_value in enumerate(full_index):
+                            row_data[f'_index_level_{i}'] = index_value
+
+                        processed_data.append(row_data)
+            else:
+                # Continue traversing deeper
+                for key, nested_obj in obj.items():
+                    if isinstance(nested_obj, dict):
+                        _flatten_nested_dict(nested_obj, index_path + [key], current_depth + 1)
+
+        # Process all data keys
+        for data_key in data_keys:
+            _flatten_nested_dict(sub_payload[data_key], [data_key])
+
+        if not processed_data:
+            return pd.DataFrame()
+
+        # Create DataFrame
+        _df = pd.DataFrame(processed_data)
+
+        # Extract index columns and create multi-level index
+        index_columns = [col for col in _df.columns if col.startswith('_index_level_')]
+        index_columns.sort()  # Ensure proper order
+
+        if index_columns:
+            # Extract index values
+            index_values = []
+            for _, row in _df.iterrows():
+                index_tuple = tuple(row[col] for col in index_columns)
+                index_values.append(index_tuple)
+
+            # Create multi-level index
+            if len(index_columns) > 1:
+                _df.index = pd.MultiIndex.from_tuples(index_values)
+            else:
+                _df.index = [idx[0] for idx in index_values]
+
+            # Remove temporary index columns
+            _df.drop(columns=index_columns, inplace=True)
+
+        # Add any additional metadata as columns (excluding those used for structure)
+        for key in metadata.keys():
+            if key not in ["columns", "next"]:  # Skip structural metadata
+                _df[key] = str(metadata[key])
+
+        return _df
+
+    @staticmethod
     def _process_payload_df(payload) -> pd.DataFrame:
         if 'metadata' in payload.keys():
             # We are processing a historical data payload, handle metadata
@@ -164,18 +408,33 @@ class RestService(ABC):
             # If no data, return empty data frame
             if len(sub_payload) == 0:
                 return pd.DataFrame()
+
+            # Check for nested dictionary structure first
+            is_nested, actual_depth = RestService._detect_nested_dict_structure(sub_payload, payload['metadata'])
+            if is_nested:
+                _df = RestService._process_nested_dict_structure(sub_payload, payload['metadata'], actual_depth)
+
+            elif RestService._detect_key_to_list_structure(sub_payload, payload['metadata']):
+                _df = RestService._process_key_to_list_structure(sub_payload, payload['metadata'])
+
             elif 'columns' in payload['metadata']:
                 columns = payload['metadata']['columns']
                 _df = pd.DataFrame.from_dict(sub_payload)
                 _df.columns = columns
+
+                for key in payload['metadata'].keys():
+                    # Columns would have been handled earlier
+                    if key == "columns":
+                        continue
+                    _df[key] = str(payload['metadata'][key])  # casting to str since metadata is not always a string
             else:
                 _df = pd.DataFrame.from_dict(sub_payload)
 
-            for key in payload['metadata'].keys():
-                # Columns would have been handled earlier
-                if key == "columns":
-                    continue
-                _df[key] = payload['metadata'][key]
+                for key in payload['metadata'].keys():
+                    # Columns would have been handled earlier
+                    if key == "columns":
+                        continue
+                    _df[key] = str(payload['metadata'][key])  # casting to str since metadata is not always a string
         else:
             if type(payload['data']) == dict:
                 _df = pd.DataFrame.from_records(payload['data'], index=[0])
@@ -185,8 +444,16 @@ class RestService(ABC):
         tz_local = pytz.timezone('US/Eastern')
         # Add UTC & EST Time Columns
         if not _df.empty and 'timestamp' in _df.columns:
-            _df['timeUTC'] = pd.to_datetime(pd.to_numeric(_df["timestamp"]), unit="ms", utc=True)
-            _df['timeEST'] = _df['timeUTC'].dt.tz_convert(tz_local)
+            try:
+                _df['timeUTC'] = pd.to_datetime(pd.to_numeric(_df["timestamp"]), unit="ms", utc=True)
+                _df['timeEST'] = _df['timeUTC'].dt.tz_convert(tz_local)
+            except ValueError as e:
+                lg.error(f"Error converting timestamp to datetime, not numeric: {e}")
+                _df['timeUTC'] = pd.to_datetime(_df["timestamp"], utc=True)
+                _df['timeEST'] = _df['timeUTC'].dt.tz_convert(tz_local)
+            except Exception as e:
+                lg.error(f"Error converting timestamp to datetime: {e}")
+                lg.error(f"Please contact administrators from github.com")
         elif not _df.empty and 'exchangeTimestamp' in _df.columns:
             _df['timeUTC'] = pd.to_datetime(pd.to_numeric(_df["exchangeTimestamp"]), unit="ms", utc=True)
             _df['timeEST'] = _df['timeUTC'].dt.tz_convert(tz_local)
@@ -230,8 +497,8 @@ class RestService(ABC):
         lg.debug(f"Will use {cpu_count} threads")
         date_ranges = RestService._get_date_ranges_for_parallel(start_date, end_date, batch_period)
         partial_process_batch = partial(RestService._process_batch,
-                                      headers=headers, url=url,
-                                      params=params, description=description)
+                                        headers=headers, url=url,
+                                        params=params, description=description)
         p = multiprocessing.Pool(cpu_count)
         lg.debug("Starting multi threaded requests...")
         result_dfs = p.map(partial_process_batch, date_ranges)
@@ -242,7 +509,7 @@ class RestService(ABC):
         return result_df
 
     @classmethod
-    def get_and_process_response_df(cls, url: str, params: Dict[str, str], headers: Dict[str, str], description: str,
+    def get_and_process_response_df(cls, url: str, params: Dict[str, Any], headers: Dict[str, str], description: str,
                                     retryCount: int = 5) -> pd.DataFrame:
         more_data_to_fetch = True
         next_url = url
@@ -252,7 +519,7 @@ class RestService(ABC):
             if success:
                 raw_data = cls._process_payload_df(cls._process_response(res))
                 # If 'next' is in the raw data, and it contains a URL, it implies the data is paginated, run in a loop until all data is received.
-                if 'next' in raw_data.columns and raw_data['next'].unique()[0] is not None:
+                if 'next' in raw_data.columns and raw_data['next'].unique()[0] not in [None, 'None']:
                     next_url = raw_data['next'].unique()[0]
                     lg.debug(f"Fetching next page from: {next_url}")
                 else:
@@ -262,7 +529,8 @@ class RestService(ABC):
                 else:
                     continue
             else:
-                raise ValueError(f"Failed to fetch data for request:{description}, url:{url}, params:{params} after {retryCount} retries.")
+                raise ValueError(
+                    f"Failed to fetch data for request:{description}, url:{url}, params:{params} after {retryCount} retries.")
 
         if 'next' in paged_data.columns:
             paged_data.drop(columns=['next'], inplace=True)
@@ -289,7 +557,8 @@ class RestService(ABC):
                 else:
                     continue
             else:
-                raise ValueError(f"Failed to fetch data for request:{description}, url:{url}, params:{params} after {retry_count} retries.")
+                raise ValueError(
+                    f"Failed to fetch data for request:{description}, url:{url}, params:{params} after {retry_count} retries.")
 
         # paged_data contains paginated data, we need to merge them properly but:
         # each page could be a list, at which point we'd simply do an append OR
@@ -314,8 +583,6 @@ class RestService(ABC):
         return ret_data
 
 
-
-
 def get_amberdata_api_key_from_local_file(file_path: str) -> str:
     try:
         with open(file_path, 'r') as file:
@@ -328,6 +595,7 @@ def get_amberdata_api_key_from_local_file(file_path: str) -> str:
         raise KeyError("The 'amberdata_api_key' key is missing in the file.")
     except json.JSONDecodeError:
         raise ValueError("The file is not valid JSON.")
+
 
 def get_amberdata_api_key_from_aws_secret_manager(secret_name: str, secret_key: str) -> str:
     sm = SecretManager()

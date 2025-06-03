@@ -389,7 +389,7 @@ class SpotRestService(RestService):
 
     def get_historical_ticker_raw(self, instrument: str, exchange: MarketDataVenue, start_date: datetime = None,
                                   end_date: datetime = None, time_format: TimeFormat = None,
-                                  batch_period: timedelta = BatchPeriod.HOUR_8.value, parallel_exec: bool = False) -> pd.DataFrame:
+                                  batch_period: BatchPeriod = BatchPeriod.HOUR_8, parallel_exec: bool = False) -> pd.DataFrame:
         params = {
             'exchange': exchange.value,
         }
@@ -403,7 +403,7 @@ class SpotRestService(RestService):
         description = f"SPOT Historical Ticker Request for {instrument}"
         lg.info(f"Starting {description}")
         if parallel_exec:
-            return_df = RestService._process_parallel(start_date, end_date, batch_period, self._headers(), url,
+            return_df = RestService._process_parallel(start_date, end_date, batch_period.value, self._headers(), url,
                                                       params, description, self._get_max_threads())
         else:
             return_df = RestService.get_and_process_response_df(url, params, self._headers(), description)
@@ -412,7 +412,7 @@ class SpotRestService(RestService):
 
     def get_historical_ticker(self, instrument: str, exchange: MarketDataVenue = None, start_date: datetime = None,
                               end_date: datetime = None, time_format: TimeFormat = None,
-                              index_keys: List[str] = None, batch_period: timedelta = BatchPeriod.HOUR_8.value,
+                              index_keys: List[str] = None, batch_period: BatchPeriod = BatchPeriod.HOUR_8,
                               parallel_exec: bool = False) -> pd.DataFrame:
         if index_keys is None:
             index_keys = ['timestamp', 'instrument', 'exchange']
@@ -498,7 +498,7 @@ class SpotRestService(RestService):
                                             batch_period: timedelta = BatchPeriod.HOUR_8.value,
                                             parallel_execution: bool = False) -> pd.DataFrame:
         if index_keys is None:
-            index_keys = ['timestamp', 'instrument', 'exchange', 'side']
+            index_keys = ['timestamp', 'instrument', 'exchange']
         processed_df = self.get_order_book_snapshots_historical_raw(
             instrument, exchange, start_date, end_date, max_level, timestamp, time_format,
             batch_period, parallel_execution

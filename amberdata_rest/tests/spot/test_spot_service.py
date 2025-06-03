@@ -568,9 +568,8 @@ class SpotRestTest(unittest.TestCase):
         result = srs.get_order_book_snapshots_historical('eth_usd', MarketDataVenue.BITFINEX)
         self.assertIsNotNone(result, 'result is None')
         self.assertFalse(result.empty, 'result is empty')
-        self.assertIn('price', result.columns, 'price not in columns')
-        self.assertIn('volume', result.columns, 'volume not in columns')
-        self.assertIn('numOrders', result.columns, 'numOrders not in columns')
+        self.assertIn('bid', result.columns, 'bid not in columns')
+        self.assertIn('ask', result.columns, 'ask not in columns')
 
     def test_get_order_book_snapshots_historical_raw_with_params(self):
         start_date = datetime(2024, 7, 15, 0, 0, 0)
@@ -589,17 +588,22 @@ class SpotRestTest(unittest.TestCase):
         )
         self.assertIsNotNone(result, 'result is None')
         self.assertFalse(result.empty, 'result is empty')
-        self.assertIn('price', result.columns, 'price not in columns')
-        self.assertIn('volume', result.columns, 'volume not in columns')
-        self.assertIn('numOrders', result.columns, 'numOrders not in columns')
+        self.assertIn('bid', result.columns, 'bid not in columns')
+        self.assertIn('ask', result.columns, 'ask not in columns')
 
     def test_get_order_book_events_historical_raw_vanilla(self):
-        result = srs.get_order_book_events_historical_raw('btc_usd', MarketDataVenue.GDAX)
+        start_date = datetime.fromisoformat("2024-03-01T00:00:00")
+        end_date = datetime.fromisoformat("2024-03-01T01:00:00")
+        result = srs.get_order_book_events_historical_raw('btc_usd', MarketDataVenue.GDAX, start_date=start_date,
+                                                          end_date=end_date)
         self.assertIsNotNone(result, 'result is None')
         self.assertFalse(result.empty, 'result is empty')
 
     def test_get_order_book_events_historical_vanilla(self):
-        result = srs.get_order_book_events_historical('btc_usd', MarketDataVenue.GDAX)
+        start_date = datetime.fromisoformat("2024-03-01T00:00:00")
+        end_date = datetime.fromisoformat("2024-03-01T01:00:00")
+        result = srs.get_order_book_events_historical('btc_usd', MarketDataVenue.GDAX, start_date=start_date,
+                                                      end_date=end_date)
         self.assertIsNotNone(result, 'result is None')
         self.assertFalse(result.empty, 'result is empty')
         self.assertIn('price', result.columns, 'price not in columns')

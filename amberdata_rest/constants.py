@@ -152,6 +152,7 @@ class MarketDataVenue(str, Enum):
     OKEX = "okex"
     POLONIEX = "poloniex"
     DERIBIT = "deribit"
+    HYPERLIQUID = "hyperliquid"
 
 class TimeFormat(Enum):
     MILLISECONDS = "milliseconds"

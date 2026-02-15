@@ -18,7 +18,8 @@ AMBERDATA_SPOT_REST_ORDER_BOOK_SNAPSHOTS_ENDPOINT = "https://api.amberdata.com/m
 AMBERDATA_SPOT_REST_VWAP_ENDPOINT = "https://api.amberdata.com/market/spot/vwap/"
 
 # Futures End Points
-AMBERDATA_FUTURES_REST_EXCHANGES_ENDPOINT = "https://api.amberdata.com//markets/futures/exchanges/"
+AMBERDATA_FUTURES_REST_EXCHANGES_REFERENCE_ENDPOINT = "https://api.amberdata.com/markets/futures/exchanges/reference"
+AMBERDATA_FUTURES_REST_EXCHANGES_INFORMATION_ENDPOINT = "https://api.amberdata.com/markets/futures/exchanges/information"
 AMBERDATA_FUTURES_REST_FUNDING_RATES_ENDPOINT = "https://api.amberdata.com/markets/futures/funding-rates/"
 AMBERDATA_FUTURES_REST_BATCH_FUNDING_RATES_ENDPOINT = "https://api.amberdata.com/market/futures/funding-rates/"
 AMBERDATA_FUTURES_REST_INSURANCE_FUNDS_ENDPOINT = "https://api.amberdata.com/markets/futures/insurance-fund/"

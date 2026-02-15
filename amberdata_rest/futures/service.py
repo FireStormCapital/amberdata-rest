@@ -14,7 +14,7 @@ from amberdata_rest.constants import \
     AMBERDATA_FUTURES_REST_BATCH_OHLCV_ENDPOINT, AMBERDATA_FUTURES_REST_OPEN_INTEREST_ENDPOINT, \
     AMBERDATA_FUTURES_REST_BATCH_OPEN_INTEREST_ENDPOINT, AMBERDATA_FUTURES_REST_ORDER_BOOK_SNAPSHOTS_ENDPOINT, \
     AMBERDATA_FUTURES_REST_ORDER_BOOK_EVENTS_ENDPOINT, AMBERDATA_FUTURES_REST_TICKERS_ENDPOINT, \
-    AMBERDATA_FUTURES_REST_TRADES_ENDPOINT, BatchPeriod
+    AMBERDATA_FUTURES_REST_TRADES_ENDPOINT, AMBERDATA_FUTURES_REST_EXCHANGES_REFERENCE_ENDPOINT, BatchPeriod
 
 
 class FuturesRestService(RestService):
@@ -893,3 +893,30 @@ class FuturesRestService(RestService):
             index_keys = ['timestamp', 'instrument', 'exchange']
         return self.get_trades_raw(instrument, exchange, start_date, end_date, time_format, sort_direction).set_index(
             index_keys)
+
+    def get_exchanges_reference(self, exchanges: List[MarketDataVenue] = None,
+                                include_inactive: bool = None) -> Dict:
+        """
+        Fetch futures instrument listings from /markets/futures/exchanges/.
+
+        Returns raw dict with 'data' key containing instrument entries per exchange.
+
+        Args:
+            exchanges: Filter to specific exchanges.
+            include_inactive: Include delisted/inactive instruments.
+
+        Returns:
+            Dict with 'data' list of instrument entries.
+        """
+        params = {}
+        if exchanges is not None and len(exchanges) > 0:
+            params['exchange'] = ",".join(exchange.value for exchange in exchanges)
+        if include_inactive is not None:
+            params['includeInactive'] = str(include_inactive).lower()
+
+        url = AMBERDATA_FUTURES_REST_EXCHANGES_REFERENCE_ENDPOINT
+        description = "FUTURES Exchanges Reference Request"
+        lg.info(f"Starting {description}")
+        return_dict = self.get_and_process_response_dict(url, params, self._headers(), description)
+        lg.info(f"Finished {description}")
+        return return_dict

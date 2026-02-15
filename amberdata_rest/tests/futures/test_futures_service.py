@@ -380,3 +380,22 @@ class FuturesRestTest(unittest.TestCase):
         instrument_set = trades_data.index.get_level_values('instrument').unique()
         self.assertTrue(exchange in exchange_set, 'exchange not in trades index')
         self.assertTrue(instrument in instrument_set, 'instrument not in trades index')
+
+    def test_get_exchanges_reference_vanilla(self):
+        result = frs.get_exchanges_reference()
+        self.assertIsInstance(result, dict, 'result is not a dict')
+        self.assertIn('data', result, 'data key not in result')
+        self.assertTrue(len(result['data']) > 0, 'no exchanges reference data returned')
+        # Verify entries have expected fields
+        first_entry = result['data'][0]
+        self.assertIn('exchange', first_entry, 'exchange not in entry')
+        self.assertIn('instrument', first_entry, 'instrument not in entry')
+
+    def test_get_exchanges_reference_filtered_by_exchange(self):
+        result = frs.get_exchanges_reference(exchanges=[MarketDataVenue.BINANCE])
+        self.assertIsInstance(result, dict, 'result is not a dict')
+        self.assertIn('data', result, 'data key not in result')
+        self.assertTrue(len(result['data']) > 0, 'no exchanges reference data for binance')
+        # All entries should be binance
+        for entry in result['data']:
+            self.assertEqual(entry['exchange'].lower(), 'binance', f'unexpected exchange: {entry["exchange"]}')

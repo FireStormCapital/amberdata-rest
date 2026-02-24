@@ -349,9 +349,9 @@ class FuturesRestTest(unittest.TestCase):
 
     def test_get_tickers_with_parallel_execution(self):
         exchange = MarketDataVenue.BINANCE
-        instrument = "BTCUSDT"
+        instrument = "AVAXUSDT"
         start_date = datetime(2024, 8, 1, 0, 0, 0)
-        end_date = datetime(2024, 8, 1, 0, 5, 0)
+        end_date = datetime(2024, 8, 1, 9, 0, 0)
         tickers_data = frs.get_tickers_raw(
             instrument,
             exchange,

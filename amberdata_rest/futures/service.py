@@ -795,7 +795,9 @@ class FuturesRestService(RestService):
 
     def get_tickers_raw(self, instrument: str, exchange: MarketDataVenue,
                         start_date: datetime = None, end_date: datetime = None,
-                        time_format: TimeFormat = None, sort_direction: SortDirection = None) -> pd.DataFrame:
+                        time_format: TimeFormat = None, sort_direction: SortDirection = None,
+                        batch_period: BatchPeriod = BatchPeriod.HOUR_8,
+                        parallel_exec: bool = False) -> pd.DataFrame:
         params = {
             'exchange': exchange.value,
         }
@@ -810,17 +812,27 @@ class FuturesRestService(RestService):
         url = AMBERDATA_FUTURES_REST_TICKERS_ENDPOINT + f"{instrument}"
         description = f"FUTURES Historical Ticker Request for {instrument}"
         lg.info(f"Starting {description}")
-        return_df = RestService.get_and_process_response_df(url, params, self._headers(), description)
+        if parallel_exec:
+            return_df = RestService._process_parallel(
+                start_date, end_date, batch_period.value, self._headers(),
+                url, params, description, self._get_max_threads()
+            )
+        else:
+            return_df = RestService.get_and_process_response_df(url, params, self._headers(), description)
         lg.info(f"Finished {description}")
         return return_df
 
     def get_tickers(self, instrument: str, exchange: MarketDataVenue = None, start_date: datetime = None,
                     end_date: datetime = None, time_format: TimeFormat = None, sort_direction: SortDirection = None,
-                    index_keys: List[str] = None) -> pd.DataFrame:
+                    index_keys: List[str] = None,
+                    batch_period: BatchPeriod = BatchPeriod.HOUR_8,
+                    parallel_exec: bool = False) -> pd.DataFrame:
         if index_keys is None:
             index_keys = ['exchangeTimestamp', 'instrument', 'exchange']
-        return self.get_tickers_raw(instrument, exchange, start_date, end_date, time_format, sort_direction).set_index(
-            index_keys)
+        return self.get_tickers_raw(
+            instrument, exchange, start_date, end_date, time_format, sort_direction,
+            batch_period=batch_period, parallel_exec=parallel_exec
+        ).set_index(index_keys)
 
     def get_trades_information_raw(self, exchanges: List[MarketDataVenue] = None, include_inactive: bool = None,
                                    time_format: TimeFormat = None) -> pd.DataFrame:

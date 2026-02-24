@@ -347,6 +347,27 @@ class FuturesRestTest(unittest.TestCase):
         self.assertTrue(exchange in exchange_set, 'exchange not in tickers index')
         self.assertTrue(instrument in instrument_set, 'instrument not in tickers index')
 
+    def test_get_tickers_with_parallel_execution(self):
+        exchange = MarketDataVenue.BINANCE
+        instrument = "BTCUSDT"
+        start_date = datetime(2024, 8, 1, 0, 0, 0)
+        end_date = datetime(2024, 8, 1, 0, 5, 0)
+        tickers_data = frs.get_tickers_raw(
+            instrument,
+            exchange,
+            start_date,
+            end_date,
+            parallel_exec=True
+        )
+        self.assertTrue(len(tickers_data) > 0, 'no tickers data returned')
+        self.assertTrue('bid' in tickers_data.columns, 'bid not in tickers data keys')
+        self.assertTrue('ask' in tickers_data.columns, 'ask not in tickers data keys')
+        self.assertTrue('mid' in tickers_data.columns, 'mid not in tickers data keys')
+        self.assertTrue('exchange' in tickers_data.columns, 'exchange not in tickers data keys')
+        self.assertTrue('instrument' in tickers_data.columns, 'instrument not in tickers data keys')
+        self.assertTrue('binance' in tickers_data['exchange'].values, 'binance not in tickers exchange values')
+        self.assertTrue(instrument in tickers_data['instrument'].values, 'instrument not in tickers values')
+
     def test_get_trades_information(self):
         trades_info = frs.get_trades_information()
         self.assertTrue(len(trades_info) > 0, 'no trades information returned')
